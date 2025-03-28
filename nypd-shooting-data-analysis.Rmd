@@ -1,0 +1,378 @@
+---
+title: "NYPD Shooting Data Analysis"
+author: "Andrew Savala"
+date: "2025-03-22"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(corrplot)
+```
+
+## Overview
+
+In this project I will be analyzing historic NYPD shooting data from 2006 to 2023.  The shooting data comes from the five boroughs of New York City: Manhattan, Brooklyn, Queens, the Bronx, and Staten Island.  My goal is to identify any underlying trends in the data that help better understand the shooting activity varies by borough.
+
+## Step 1: Import NYPD Shooting Data
+
+```{r import}
+# Read shooting data from NYC Open Data
+shooting_data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## Step 2: Tidy and Transform Data
+
+### Examine Our Data
+
+```{r display}
+# Display our raw shooting data
+str(shooting_data)
+```
+Lets keep only the columns we're interested in.
+
+```{r drop-columns}
+# Drop columns we don't need
+shooting_data <- shooting_data[, c("OCCUR_DATE", "BORO", "PRECINCT", "PERP_AGE_GROUP", "PERP_SEX", "PERP_RACE", "VIC_AGE_GROUP", "VIC_SEX", "VIC_RACE")]
+```
+
+```{r convert-dates}
+# Convert OCCUR_DATE to a date
+shooting_data$OCCUR_DATE <- as.Date(shooting_data$OCCUR_DATE, format="%m/%d/%Y")
+
+summary(shooting_data$OCCUR_DATE)
+```
+### Check For Missing Data
+
+Lets start by checking for missing values in our data.
+
+```{r missing-values}
+# Check for missing values in our data
+colSums(is.na(shooting_data)) / nrow(shooting_data) * 100
+```
+It looks like there's no null values.  However, we should check for empty strings as well.
+
+```{r empty-strings}
+# Check for empty strings in our data
+colSums(shooting_data == "") / nrow(shooting_data) * 100
+```
+PERP_AGE_GROUP, PERP_SEX and PERP_RACE also all have roughly 33% missing values. Let's take a closer look at the values in these columns.
+
+```{r unique-perp-age-group}
+# Look at unique values in PERP_AGE_GROUP
+unique(shooting_data$PERP_AGE_GROUP)
+```
+
+OK there's some interesting stuff going on with the values in PERP_AGE_GROUP.  There are some values that are clearly not valid ages.  Lets just treat all of these values as UNKNOWN.
+
+```{r clean-perp-age-group}
+unknown_values <- c("", "1020", "1080", "(null)", "1028", "940", "224")
+shooting_data$PERP_AGE_GROUP <- ifelse(
+  shooting_data$PERP_AGE_GROUP %in% unknown_values,
+  "UNKNOWN",
+  shooting_data$PERP_AGE_GROUP
+)
+
+unique(shooting_data$PERP_AGE_GROUP)
+```
+Lets examine the PERP_SEX column.
+
+```{r unique-perp-sex}
+# Look at unique values in PERP_SEX
+unique(shooting_data$PERP_SEX)
+```
+Same thing with PERP_SEX.  There seem to be multiple labels for unknown values.  Lets just treat all of these values as U.
+
+```{r clean-perp-sex}
+unknown_values <- c("", "(null)", "UNKNOWN")
+shooting_data$PERP_SEX <- ifelse(
+  shooting_data$PERP_SEX %in% unknown_values,
+  "U",
+  shooting_data$PERP_SEX
+)
+
+unique(shooting_data$PERP_SEX)
+```
+Lets examine the PERP_RACE column.
+
+```{r unique-perp-race}
+# Look at unique values in PERP_RACE
+unique(shooting_data$PERP_RACE)
+```
+Lets do the same thing and consolidate the unknown into a single value.
+
+```{r clean-perp-race}
+unknown_values <- c("", "(null)")
+shooting_data$PERP_RACE <- ifelse(
+  shooting_data$PERP_RACE %in% unknown_values,
+  "UNKNOWN",
+  shooting_data$PERP_RACE
+)
+
+unique(shooting_data$PERP_RACE)
+```
+Lets do the same for the victim columns.
+
+```{r unique-vic-age-group}
+# Look at unique values in VIC_AGE_GROUP
+unique(shooting_data$VIC_AGE_GROUP)
+```
+Lets just treat the unusual 1022 value as UNKNOWN.
+
+```{r clean-vic-age-group}
+unknown_values <- c("1022")
+shooting_data$VIC_AGE_GROUP <- ifelse(
+  shooting_data$VIC_AGE_GROUP %in% unknown_values,
+  "UNKNOWN",
+  shooting_data$VIC_AGE_GROUP
+)
+
+unique(shooting_data$VIC_AGE_GROUP)
+```
+
+
+```{r unique-vic-sex}
+# Look at unique values in VIC_SEX
+unique(shooting_data$VIC_SEX)
+```
+Victim sex data looks acceptable.
+
+```{r unique-vic-race}
+# Look at unique values in VIC_RACE
+unique(shooting_data$VIC_RACE)
+```
+Victim race data looks acceptable.
+
+One more time, lets look at our data.
+
+```{r}
+head(shooting_data)
+```
+
+This is feeling a lot better.  Lets factorize all of our character columns.
+
+### Factorize Columns
+
+```{r convert-factors}
+# Factorize all character columns
+shooting_data <- shooting_data %>% 
+  mutate_if(is.character, as.factor)
+```
+
+```{r}
+# Review our data
+str(shooting_data)
+```
+## Step 3: Add Visualizations and Analysis
+
+### Visualizations
+
+```{r distributions}
+# Distribution of the perpetrators by age group PERP_AGE_GROUP
+shooting_data %>%
+  count(PERP_AGE_GROUP) %>%
+  ggplot(aes(x = PERP_AGE_GROUP, y = n)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Distribution of Perpitrators by Age Group",
+       x = "Age Group",
+       y = "Number of perpetrators")
+
+# Distribution of the perpetrators by sex PERP_SEX
+shooting_data %>%
+  count(PERP_SEX) %>%
+  ggplot(aes(x = PERP_SEX, y = n)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Distribution of Perpitrators by Sex",
+       x = "Sex",
+       y = "Number of Perpitrators")
+
+# Distribution of the perpetrators by race PERP_RACE 
+shooting_data %>%
+  count(PERP_RACE) %>%
+  ggplot(aes(x = PERP_RACE, y = n)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Distribution of Perpitrators by Race",
+       x = "Race",
+       y = "Number of Perpitrators")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Distribution of shootings by borough BORO
+shooting_data %>%
+  count(BORO) %>%
+  ggplot(aes(x = BORO, y = n)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Distribution of Shootings by Borough",
+       x = "Borough",
+       y = "Number of Shootings")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+
+### Analysis
+
+Lets take a closer look at the shootings by borough over time and see what the trends looks like.
+
+```{r shootings-over-time}
+# Create a data frame of shootings over time grouped by borough
+shootings_borough <- shooting_data %>%
+  group_by(BORO, OCCUR_DATE) %>%
+  summarise(shootings = n()) %>%
+  select(BORO, OCCUR_DATE, shootings) %>%
+  ungroup()
+
+shootings_borough
+```
+
+```{r trend-shootings-bronx}
+# Bronx
+shootings_bronx_monthly <- shootings_borough %>%
+  filter(BORO == "BRONX") %>%
+  mutate(month = floor_date(OCCUR_DATE, unit = "month")) %>%
+  group_by(month) %>%
+  summarise(shootings = sum(shootings), .groups = "drop")
+
+ggplot(shootings_bronx_monthly, aes(x = month, y = shootings)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Shootings in the Bronx",
+       x = "Date",
+       y = "Number of Shootings")
+```
+```{r trend-shootings-brooklyn}
+# Brooklyn
+shootings_brooklyn_monthly <- shootings_borough %>%
+  filter(BORO == "BROOKLYN") %>%
+  mutate(month = floor_date(OCCUR_DATE, unit = "month")) %>%
+  group_by(month) %>%
+  summarise(shootings = sum(shootings), .groups = "drop")
+
+ggplot(shootings_brooklyn_monthly, aes(x = month, y = shootings)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Shootings in Brooklyn",
+       x = "Date",
+       y = "Number of Shootings")
+```
+
+```{r trend-shootings-manhattan}
+# Manhattan
+shootings_manhattan_monthly <- shootings_borough %>%
+  filter(BORO == "MANHATTAN") %>%
+  mutate(month = floor_date(OCCUR_DATE, unit = "month")) %>%
+  group_by(month) %>%
+  summarise(shootings = sum(shootings), .groups = "drop")
+
+ggplot(shootings_manhattan_monthly, aes(x = month, y = shootings)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Shootings in the Manhattan",
+       x = "Date",
+       y = "Number of Shootings")
+```
+```{r trend-shootings-queens}
+# Queens
+shootings_queens_monthly <- shootings_borough %>%
+  filter(BORO == "QUEENS") %>%
+  mutate(month = floor_date(OCCUR_DATE, unit = "month")) %>%
+  group_by(month) %>%
+  summarise(shootings = sum(shootings), .groups = "drop")
+
+ggplot(shootings_queens_monthly, aes(x = month, y = shootings)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Shootings in the Queens",
+       x = "Date",
+       y = "Number of Shootings")
+```
+```{r trend-shootings-statenisland}
+# Staten Island
+shootings_statenisland_monthly <- shootings_borough %>%
+  filter(BORO == "STATEN ISLAND") %>%
+  mutate(month = floor_date(OCCUR_DATE, unit = "month")) %>%
+  group_by(month) %>%
+  summarise(shootings = sum(shootings), .groups = "drop")
+
+ggplot(shootings_statenisland_monthly, aes(x = month, y = shootings)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Shootings in the Staten Island",
+       x = "Date",
+       y = "Number of Shootings")
+```
+There seems to be a trend here.  Let's overlay the trends for all the boroughs to see if there's a pattern.
+
+```{r trend-shootings-all}
+
+ggplot(shootings_borough, aes(x = OCCUR_DATE, y = shootings, color = BORO)) +
+  geom_smooth(se = FALSE, method = "loess") +
+  labs(title = "Monthly Shootings by Borough",
+       x = "Date",
+       y = "Number of Shootings") 
+```
+
+
+Look at that!  They all take a dip around the same time.  It would be interesting to research what was happening in the city at that time.
+
+### Model
+
+Lets try and predict the number of shootings in each borough by year.
+
+```{r}
+shooting_data$Year <- as.numeric(format(shooting_data$OCCUR_DATE, "%Y"))
+
+# Group by borough and year
+shooting_borough_yearly <- shooting_data %>%
+  group_by(BORO, Year) %>%
+  summarise(Shootings = n(), .groups = "drop")
+
+head(shooting_borough_yearly)
+```
+
+Lets fit a simple linear model where the number of shootings is a function of the year and borough.
+
+```{r build-model}
+# Fit a simple linear model
+mod <- lm(Shootings ~ Year + BORO, data = shooting_borough_yearly)
+summary(mod)
+```
+Lets add our predicted shootings back into our data frame.
+
+```{r add-predictions}
+shooting_borough_yearly$Shootings_Pred <- predict(mod, shooting_borough_yearly)
+
+head(shooting_borough_yearly)
+```
+
+Lets visualize our predictions.
+
+```{r visualize-predictions}
+ggplot(shooting_borough_yearly, aes(x = Year, y = Shootings, color = BORO)) +
+  geom_point() +
+  geom_line(aes(y = Shootings_Pred)) +
+  labs(title = "Shootings by Borough Over Time",
+       x = "Year",
+       y = "Number of Shootings")
+```
+
+
+The dots show the actual number of shootings and the lines show the predicted number of shootings.  It looks like the model is a better fit for Manhattan and Staten Island.  The model also has a negative correlation with the year.  This is interesting because it suggests that the number of shootings is decreasing over time.
+
+## Step 4: Add Bias Identification / Conclusion
+
+I think this would have been particularly relevant if I had been investigating perpetrators.  Especially since there were so many missing values.  This makes sense because they wouldn't always be able to catch the shooter or get that information from the victim.
+
+I live in a city (Fresno, CA) where there is a lot of crime, and shootings are a common occurrence.  I think it would be interesting to compare the data from Fresno to the data from NY to see if there are any similarities or differences.  I am picturing NY through the lens of my hometown and I think it would be interesting to see if the data supports that.
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```
