@@ -3,8 +3,12 @@ title: "NYPD Shooting Data Analysis"
 author: "Andrew Savala"
 date: "2025-03-22"
 output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+    includes:
+      in_header: preamble.tex
   html_document: default
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
